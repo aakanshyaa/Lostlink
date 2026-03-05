@@ -1,4 +1,6 @@
 const db = require('../config/db');
+const fs = require('fs');
+const path = require('path');
 
 // DASHBOARD STATS
 exports.getStats = async (req, res) => {
@@ -45,15 +47,41 @@ exports.toggleBlockUser = async (req, res) => {
 };
 
 // ITEM MODERATION
+
 exports.deleteItem = async (req, res) => {
   try {
     const { type, id } = req.params;
     const table = type === 'lost' ? 'lost_items' : 'found_items';
     const idCol = type === 'lost' ? 'lost_id' : 'found_id';
 
+    // 1. Get the image path from the database first
+    const [rows] = await db.promise().query(
+      `SELECT image FROM ${table} WHERE ${idCol} = ?`, 
+      [id]
+    );
+
+    if (rows.length > 0 && rows[0].image) {
+      // 2. Construct the absolute path to the file
+      // Assuming your images are stored in a folder named 'uploads' at the root
+      const imagePath = path.join(__dirname, '..', rows[0].image);
+
+      // 3. Delete the file from the file system
+      fs.unlink(imagePath, (err) => {
+        if (err) {
+          console.error("Failed to delete local file:", err.message);
+          // We don't stop the process here; we still want to delete the DB record
+        } else {
+          console.log("File deleted successfully:", imagePath);
+        }
+      });
+    }
+
+    // 4. Delete the record from the database
     await db.promise().query(`DELETE FROM ${table} WHERE ${idCol} = ?`, [id]);
-    res.json({ message: "Item deleted by admin" });
+
+    res.json({ message: "Item and associated image deleted successfully" });
   } catch (err) {
-    res.status(500).json({ message: "Delete failed" });
+    console.error(err);
+    res.status(500).json({ message: "Delete failed", error: err.message });
   }
 };

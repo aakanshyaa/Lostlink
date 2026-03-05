@@ -19,38 +19,114 @@ exports.postItem = async (req, res) => {
   }
 };
 
-// GET UNIVERSAL FEED (With Filters)
+// GET UNIVERSAL FEED (With Filters + Pagination)
 exports.getFeed = async (req, res) => {
   try {
-    const { category, type, search } = req.query;
-    let whereClauses = ["status = 'active'"];
-    let params = [];
+    const {
+      category,
+      type,
+      search,
+      page = 1,
+      limit = 9,
+    } = req.query;
 
-    if (category) {
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const offset = (pageNum - 1) * limitNum;
+
+    let whereClauses = ["status = 'active'"];
+    let whereParams = [];
+
+    // Category filter (buttons)
+    if (category && category !== "All") {
       whereClauses.push("category = ?");
-      params.push(category);
+      whereParams.push(category);
     }
+
+    // Search (item, location, category)
     if (search) {
-      whereClauses.push("item_name LIKE ?");
-      params.push(`%${search}%`);
+      whereClauses.push(
+        "(item_name LIKE ? OR location LIKE ? OR category LIKE ?)"
+      );
+      whereParams.push(
+        `%${search}%`,
+        `%${search}%`,
+        `%${search}%`
+      );
     }
 
     const whereSql = whereClauses.join(" AND ");
 
-    const lostSql = `SELECT lost_id as id, item_name, category, location, image, created_at, 'lost' as type FROM lost_items WHERE ${whereSql}`;
-    const foundSql = `SELECT found_id as id, item_name, category, location, image, created_at, 'found' as type FROM found_items WHERE ${whereSql}`;
+    const lostSql = `
+      SELECT 
+        lost_id AS id,
+        item_name,
+        category,
+        location,
+        image,
+        created_at,
+        'lost' AS type
+      FROM lost_items
+      WHERE ${whereSql}
+    `;
+
+    const foundSql = `
+      SELECT 
+        found_id AS id,
+        item_name,
+        category,
+        location,
+        image,
+        created_at,
+        'found' AS type
+      FROM found_items
+      WHERE ${whereSql}
+    `;
 
     let finalSql = "";
-    if (type === 'lost') finalSql = `${lostSql} ORDER BY created_at DESC`;
-    else if (type === 'found') finalSql = `${foundSql} ORDER BY created_at DESC`;
-    else finalSql = `${lostSql} UNION ALL ${foundSql} ORDER BY created_at DESC`;
+    let finalParams = [];
 
-    const [items] = await db.promise().query(finalSql, [...params, ...params]);
-    res.json(items || []);
+    if (type === "lost") {
+      finalSql = `
+        ${lostSql}
+        ORDER BY created_at DESC
+        LIMIT ? OFFSET ?
+      `;
+      finalParams = [...whereParams, limitNum, offset];
+    } else if (type === "found") {
+      finalSql = `
+        ${foundSql}
+        ORDER BY created_at DESC
+        LIMIT ? OFFSET ?
+      `;
+      finalParams = [...whereParams, limitNum, offset];
+    } else {
+      finalSql = `
+        (${lostSql})
+        UNION ALL
+        (${foundSql})
+        ORDER BY created_at DESC
+        LIMIT ? OFFSET ?
+      `;
+      finalParams = [
+        ...whereParams,
+        ...whereParams,
+        limitNum,
+        offset,
+      ];
+    }
+
+    const [items] = await db.promise().query(finalSql, finalParams);
+    res.json(items);
   } catch (err) {
-    res.status(500).json({ message: "Feed error", error: err.message });
+    console.error("Feed error:", err);
+    res.status(500).json({
+      message: "Feed error",
+      error: err.message,
+    });
   }
 };
+
 
 // GET ITEM DETAILS + OWNER INFO (For WhatsApp)
 exports.getItemDetails = async (req, res) => {
@@ -90,15 +166,30 @@ exports.createRequest = async (req, res) => {
 };
 
 // RESOLVE ITEM (Owner confirms item is returned/found)
+// RESOLVE ITEM (Owner confirms item is returned/found)
 exports.resolveItem = async (req, res) => {
   try {
-    const { type, id } = req.body; // type: 'lost' or 'found'
+    const { type, id } = req.body; // Expecting { type: 'lost', id: 123 }
+    const user_id = req.user.user_id;
+
+    // 1. Determine table and ID column dynamically
     const table = type === 'lost' ? 'lost_items' : 'found_items';
     const idCol = type === 'lost' ? 'lost_id' : 'found_id';
 
-    await db.promise().query(`UPDATE ${table} SET status = 'resolved' WHERE ${idCol} = ? AND user_id = ?`, [id, req.user.user_id]);
-    res.json({ message: "Item marked as resolved" });
+    // 2. Run the update with an ownership check
+    const sql = `UPDATE ${table} SET status = 'resolved' WHERE ${idCol} = ? AND user_id = ?`;
+    const [result] = await db.promise().query(sql, [id, user_id]);
+
+    // 3. Check if anything actually changed (prevent unauthorized resolve)
+    if (result.affectedRows === 0) {
+      return res.status(403).json({ 
+        message: "Action denied. You either don't own this post or it doesn't exist." 
+      });
+    }
+
+    res.json({ message: "Item successfully marked as resolved!" });
   } catch (err) {
-    res.status(500).json({ message: "Resolution failed" });
+    console.error("Resolution error:", err);
+    res.status(500).json({ message: "Resolution failed", error: err.message });
   }
 };

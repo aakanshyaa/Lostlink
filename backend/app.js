@@ -5,8 +5,10 @@ const fs = require("fs");
 const authRoutes = require("./routes/authRoutes.js");
 const itemRoutes = require("./routes/itemRoutes.js");
 const adminRoutes = require('./routes/adminRoutes.js');
-
+require("dotenv").config();
 const app = express();
+
+
 
 app.use(cors({ origin: ["http://localhost:3000"], credentials: true }));
 // Optional headers to avoid COOP issues
