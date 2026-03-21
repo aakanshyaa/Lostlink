@@ -85,3 +85,90 @@ exports.deleteItem = async (req, res) => {
     res.status(500).json({ message: "Delete failed", error: err.message });
   }
 };
+
+
+exports.deleteUser = async (req, res) => {
+  const connection = await db.promise().getConnection();
+  try {
+    const { id } = req.params;
+
+    // Start a transaction so if one part fails, everything rolls back
+    await connection.beginTransaction();
+
+    // 1. Get all image paths for this user's items before deleting them
+    const [lostItems] = await connection.query("SELECT image FROM lost_items WHERE user_id = ?", [id]);
+    const [foundItems] = await connection.query("SELECT image FROM found_items WHERE user_id = ?", [id]);
+    
+    const allImages = [...lostItems, ...foundItems].map(item => item.image).filter(Boolean);
+
+    // 2. Delete the user (If your DB has ON DELETE CASCADE, items will vanish automatically)
+    // If not, we manually delete them:
+    await connection.query("DELETE FROM lost_items WHERE user_id = ?", [id]);
+    await connection.query("DELETE FROM found_items WHERE user_id = ?", [id]);
+    await connection.query("DELETE FROM users WHERE user_id = ?", [id]);
+
+    // 3. Commit the Database changes
+    await connection.commit();
+
+    // 4. Cleanup the File System (Images)
+    allImages.forEach(imagePath => {
+      const fullPath = path.join(__dirname, '..', imagePath);
+      if (fs.existsSync(fullPath)) {
+        fs.unlink(fullPath, (err) => {
+          if (err) console.error("File deletion failed:", err);
+        });
+      }
+    });
+
+    res.json({ message: "User and all associated data purged successfully." });
+  } catch (err) {
+    await connection.rollback();
+    console.error(err);
+    res.status(500).json({ message: "Failed to delete user", error: err.message });
+  } finally {
+    connection.release();
+  }
+};
+
+
+// ADMIN RESOLVE FEATURE
+exports.resolveItem = async (req, res) => {
+  try {
+    const { type, id } = req.body; // type and id sent from AdminDashboard
+    const table = type === 'lost' ? 'lost_items' : 'found_items';
+    const idCol = type === 'lost' ? 'lost_id' : 'found_id';
+
+    // In the Admin controller, we DON'T check for user_id 
+    // because the Admin has the authority to resolve any post.
+    const [result] = await db.promise().query(
+      `UPDATE ${table} SET status = 'resolved' WHERE ${idCol} = ?`,
+      [id]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: "Item not found" });
+    }
+
+    res.json({ message: "Item marked as resolved by Admin" });
+  } catch (err) {
+    console.error("Admin Resolve Error:", err);
+    res.status(500).json({ message: "Failed to resolve item", error: err.message });
+  }
+};
+
+
+
+exports.getResolvedReports = async (req, res) => {
+  try {
+    // Specifically querying for the 'resolved' status
+    const [rows] = await db.execute(
+      `SELECT * FROM lost_items WHERE status = 'resolved' 
+       UNION ALL 
+       SELECT * FROM found_items WHERE status = 'resolved' 
+       ORDER BY updated_at DESC`
+    );
+    res.json(rows);
+  } catch (error) {
+    res.status(500).json({ message: "Error fetching archive" });
+  }
+};

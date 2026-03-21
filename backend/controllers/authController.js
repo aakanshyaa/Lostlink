@@ -2,6 +2,8 @@ const db = require('../config/db');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { googleClient, GOOGLE_CLIENT_ID } = require("../config/google");
+const sendWelcomeEmail = require("../utils/sendEmail");
+
 
 // Helper to get secret dynamically (prevents 'undefined' on startup)
 const getSecret = () => process.env.JWT_SECRET;
@@ -22,6 +24,10 @@ exports.register = async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, 10);
     const sql = `INSERT INTO users (full_name, email, password) VALUES (?, ?, ?)`;
     await db.promise().query(sql, [full_name, email, hashedPassword]);
+
+    sendWelcomeEmail(email, full_name).catch(err => 
+      console.error("Background Email Error:", err)
+    );
 
     res.status(201).json({ message: "User registered successfully" });
   } catch (err) {
@@ -76,6 +82,7 @@ exports.login = async (req, res) => {
   }
 };
 
+
 /* GOOGLE LOGIN */
 exports.googleLogin = async (req, res) => {
   try {
@@ -93,12 +100,19 @@ exports.googleLogin = async (req, res) => {
        return res.status(403).json({ message: "Your account is blocked." });
     }
 
+    // Check if it's a NEW user
     if (!user) {
       const [result] = await db.promise().query(
         "INSERT INTO users (full_name, email, password, role, profile_image) VALUES (?, ?, ?, ?, ?)",
         [name, email, "GOOGLE_USER", "user", picture] 
       );
+      
       user = { user_id: result.insertId, full_name: name, email: email, role: "user" };
+
+      // --- TRIGGER EMAIL FOR NEW GOOGLE USER ---
+      sendWelcomeEmail(email, name).catch(err => 
+        console.error("Background Google Welcome Email Error:", err)
+      );
     }
 
     const jwtToken = jwt.sign(

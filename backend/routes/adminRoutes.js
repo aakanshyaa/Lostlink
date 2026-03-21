@@ -8,5 +8,8 @@ router.get("/stats", protect, admin, adminController.getStats);
 router.get("/users", protect, admin, adminController.getAllUsers);
 router.put("/users/block/:id", protect, admin, adminController.toggleBlockUser);
 router.delete("/items/:type/:id", protect, admin, adminController.deleteItem);
+router.delete("/users/:id", protect, admin, adminController.deleteUser);
+router.post("/items/resolve", protect, admin, adminController.resolveItem);
+router.get("/reports/resolved", protect, admin, adminController.getResolvedReports);
 
 module.exports = router;

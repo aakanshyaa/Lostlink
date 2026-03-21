@@ -12,5 +12,9 @@ router.get("/details/:type/:id", itemController.getItemDetails);
 router.post("/post", protect, upload.single("image"), itemController.postItem);
 router.post("/request", protect, itemController.createRequest);
 router.post("/resolve", protect, itemController.resolveItem);
+router.delete("/delete/:type/:id", protect, itemController.deleteItem);
+router.get("/my-activity", protect, itemController.getMyActivity);
+
+router.post("/notify-connection", protect, itemController.notifyConnection);
 
 module.exports = router;
