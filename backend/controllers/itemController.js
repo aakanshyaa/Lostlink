@@ -5,7 +5,7 @@ const nodemailer = require("nodemailer");
 // POST A NEW ITEM (Lost or Found)
 exports.postItem = async (req, res) => {
   try {
-    // 1. Added 'phone' to the destructured body
+    
     const { type, item_name, category, description, location, latitude, longitude, date, phone } = req.body;
     const user_id = req.user.user_id;
     const image = req.file ? `/uploads/${req.file.filename}` : null;
@@ -13,7 +13,7 @@ exports.postItem = async (req, res) => {
     const table = type === 'lost' ? 'lost_items' : 'found_items';
     const dateCol = type === 'lost' ? 'lost_date' : 'found_date';
 
-    // 2. Included 'phone' in the INSERT statement
+    
     const sql = `INSERT INTO ${table} 
       (user_id, item_name, category, description, location, latitude, longitude, phone, ${dateCol}, image) 
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
